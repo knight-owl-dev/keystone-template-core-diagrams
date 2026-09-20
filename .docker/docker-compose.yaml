@@ -1,0 +1,75 @@
+# No user — the diagrams service runs as its image's own UID, which is why the
+# socket it binds is 0666 for the engine to reach.
+
+services:
+  keystone:
+    image: ghcr.io/knight-owl-dev/keystone:v2.4.0
+    user: "${DOCKER_UID:-1000}:${DOCKER_GID:-1000}"
+    working_dir: /keystone
+    depends_on:
+      diagrams:
+        condition: service_healthy
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      HOME: /tmp
+    volumes:
+      - hooks:/keystone/.hooks:ro
+      - hooks-cache:/keystone/.hooks-cache
+      - ../artifacts:/keystone/artifacts
+      - ../assets:/keystone/assets:ro
+      - ../fonts:/keystone/fonts:ro
+      - ../manuscript:/keystone/manuscript:ro
+      - ../pandoc.yaml:/keystone/.pandoc/metadata/user-metadata.yaml:ro
+      - ../publish.txt:/keystone/publish.txt:ro
+      - ../shortcuts.yaml:/keystone/shortcuts.yaml:ro
+    env_file:
+      - ../project.conf
+
+  # Renders the diagram fences this template claims.
+  # https://keystone.knight-owl.dev/writing/diagrams/
+  diagrams:
+    image: ghcr.io/knight-owl-dev/keystone-hook-diagrams:v1.4.9@sha256:09fad21aa391837cb6fa743695ca62ca04c2c956084de5e7e37afe198f4fe533
+    healthcheck:
+      test: ["CMD", "test", "-S", "/hooks/diagrams.sock"]
+      interval: 30s
+      start_interval: 1s
+      timeout: 2s
+      retries: 3
+      start_period: 30s
+    network_mode: none
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    environment:
+      HOME: /tmp
+      HOOK_SOCKET: /hooks/diagrams.sock
+      KEYSTONE_DIAGRAMS_THEME: ${KEYSTONE_DIAGRAMS_THEME:-}
+      KEYSTONE_DIAGRAMS_FONT: ${KEYSTONE_DIAGRAMS_FONT:-}
+      KEYSTONE_DIAGRAMS_LOOK: ${KEYSTONE_DIAGRAMS_LOOK:-}
+    volumes:
+      - hooks:/hooks
+
+volumes:
+  # In memory, and gone with the containers that shared it.
+  # https://keystone.knight-owl.dev/hooks/#wiring-one-in
+  hooks:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=1m,mode=1777
+
+  # Replies, remembered between builds.
+  # https://keystone.knight-owl.dev/hooks/#caching
+  hooks-cache:
